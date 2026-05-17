@@ -48,6 +48,14 @@ A growing collection of production-grade n8n workflows organized into themed col
 
 ---
 
+## 📖 How-To Guides
+
+| Guide | Description |
+|:------|:------------|
+| [How to Set Up n8n](./How-To/How_to_Set_Up_N8N.md) | Beginner-friendly walkthrough for installing and running n8n on Windows |
+
+---
+
 ## 🚀 Getting Started
 
 1. Open your n8n instance
