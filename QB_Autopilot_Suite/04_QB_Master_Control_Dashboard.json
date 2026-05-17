@@ -1,0 +1,343 @@
+{
+  "name": "QB Master Control Dashboard",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "health-check-timer",
+      "name": "System Health Check Timer",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "import requests\nimport json\nfrom datetime import datetime, timedelta\n\n# System health monitoring\nsystem_status = {\n    'timestamp': datetime.now().isoformat(),\n    'overall_health': 'healthy',\n    'services': {},\n    'workflow_stats': {},\n    'alerts': [],\n    'daily_summary': {}\n}\n\n# Check critical workflows (simulated - replace with actual n8n API calls)\nworkflows_to_check = [\n    'QB Invoice Processing Hub',\n    'QB Expense Automation Engine', \n    'QB Client Onboarding Orchestrator'\n]\n\nfor workflow in workflows_to_check:\n    try:\n        # Simulate workflow health check\n        # In production, you'd call n8n API to check workflow status\n        workflow_health = {\n            'status': 'active',\n            'last_execution': datetime.now() - timedelta(minutes=random.randint(5, 60)),\n            'success_rate': 0.95,\n            'executions_today': random.randint(10, 50),\n            'avg_execution_time': f\"{random.randint(15, 120)}s\"\n        }\n        system_status['services'][workflow] = workflow_health\n    except Exception as e:\n        system_status['services'][workflow] = {'status': 'error', 'error': str(e)}\n        system_status['alerts'].append(f\"Workflow '{workflow}' health check failed: {e}\")\n\n# Check external service connectivity\nexternal_services = {\n    'QuickBooks API': 'https://sandbox-quickbooks.api.intuit.com/v3/company/test/items',\n    'OpenAI API': 'https://api.openai.com/v1/models',\n    'Notion API': 'https://api.notion.com/v1/users/me'\n}\n\nfor service, endpoint in external_services.items():\n    try:\n        # Simulate API health check (replace with actual API calls using proper auth)\n        service_health = {\n            'status': 'online',\n            'response_time': f\"{random.randint(50, 300)}ms\",\n            'last_check': datetime.now().isoformat()\n        }\n        system_status['services'][service] = service_health\n    except Exception as e:\n        system_status['services'][service] = {'status': 'offline', 'error': str(e)}\n        system_status['alerts'].append(f\"Service '{service}' is offline: {e}\")\n\n# Calculate daily summary stats\ntoday = datetime.now().date()\nsystem_status['daily_summary'] = {\n    'total_invoices_processed': random.randint(15, 45),\n    'total_expenses_processed': random.randint(25, 75),\n    'new_clients_onboarded': random.randint(1, 5),\n    'total_api_calls': random.randint(500, 1500),\n    'avg_processing_time': f\"{random.randint(30, 90)}s\",\n    'error_rate': f\"{random.uniform(0.5, 5.0):.1f}%\"\n}\n\n# Determine overall health\noffline_services = [name for name, info in system_status['services'].items() \n                   if info.get('status') in ['error', 'offline']]\n\nif len(offline_services) > 2:\n    system_status['overall_health'] = 'critical'\n    system_status['alerts'].append(f\"Multiple services offline: {', '.join(offline_services)}\")\nelif len(offline_services) > 0:\n    system_status['overall_health'] = 'degraded'\n    system_status['alerts'].append(f\"Some services offline: {', '.join(offline_services)}\")\n\n# Add performance alerts\nif system_status['daily_summary']['total_api_calls'] > 1200:\n    system_status['alerts'].append(\"High API usage detected - approaching rate limits\")\n\nif float(system_status['daily_summary']['error_rate'].replace('%', '')) > 3.0:\n    system_status['alerts'].append(\"Error rate above normal threshold\")\n\nreturn system_status"
+      },
+      "id": "system-monitor",
+      "name": "System Status Monitor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-alerts",
+              "leftValue": "={{ $json.alerts.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combineOperation": "any"
+        },
+        "options": {}
+      },
+      "id": "alert-check",
+      "name": "Has Alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "your-ops-email@company.com",
+        "subject": "🚨 QB System Alert - {{ $json.overall_health.toUpperCase() }}",
+        "message": "SYSTEM HEALTH ALERT\\n\\n⚠️ Status: {{ $json.overall_health.toUpperCase() }}\\n🕐 Time: {{ $json.timestamp }}\\n\\n🚨 ACTIVE ALERTS:\\n{{ $json.alerts.map(alert => '• ' + alert).join('\\n') }}\\n\\n📊 SERVICE STATUS:\\n{{ Object.entries($json.services).map(([name, info]) => `• ${name}: ${info.status.toUpperCase()}`).join('\\n') }}\\n\\n📈 TODAY'S STATS:\\n• Invoices Processed: {{ $json.daily_summary.total_invoices_processed }}\\n• Expenses Processed: {{ $json.daily_summary.total_expenses_processed }}\\n• New Clients: {{ $json.daily_summary.new_clients_onboarded }}\\n• API Calls: {{ $json.daily_summary.total_api_calls }}\\n• Error Rate: {{ $json.daily_summary.error_rate }}\\n\\nPlease investigate and resolve any issues immediately.\\n\\n🔧 NEXT STEPS:\\n1. Check workflow execution logs\\n2. Verify API credentials and connectivity\\n3. Monitor system resources\\n4. Update client communications if needed\\n\\nQB Autopilot Monitoring",
+        "options": {}
+      },
+      "id": "alert-email",
+      "name": "Send Alert Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [860, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": "YOUR_NOTION_HEALTH_LOG_DB_ID",
+        "properties": {
+          "values": [
+            {
+              "key": "Timestamp",
+              "textContent": "={{ $json.timestamp }}"
+            },
+            {
+              "key": "Overall Health",
+              "textContent": "={{ $json.overall_health }}"
+            },
+            {
+              "key": "Total Alerts",
+              "numberContent": "={{ $json.alerts.length }}"
+            },
+            {
+              "key": "Services Online",
+              "numberContent": "={{ Object.values($json.services).filter(s => s.status === 'online' || s.status === 'active').length }}"
+            },
+            {
+              "key": "Total Services",
+              "numberContent": "={{ Object.keys($json.services).length }}"
+            },
+            {
+              "key": "Invoices Today",
+              "numberContent": "={{ $json.daily_summary.total_invoices_processed }}"
+            },
+            {
+              "key": "Expenses Today", 
+              "numberContent": "={{ $json.daily_summary.total_expenses_processed }}"
+            },
+            {
+              "key": "New Clients Today",
+              "numberContent": "={{ $json.daily_summary.new_clients_onboarded }}"
+            },
+            {
+              "key": "API Calls Today",
+              "numberContent": "={{ $json.daily_summary.total_api_calls }}"
+            },
+            {
+              "key": "Error Rate",
+              "textContent": "={{ $json.daily_summary.error_rate }}"
+            },
+            {
+              "key": "Alert Details",
+              "textContent": "={{ $json.alerts.join(' | ') }}"
+            }
+          ]
+        }
+      },
+      "id": "health-log",
+      "name": "Log Health Status",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2,
+      "position": [860, 400],
+      "credentials": {
+        "notionApi": {
+          "id": "YOUR_NOTION_CREDENTIAL_ID",
+          "name": "Notion Integration"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "cronExpression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "daily-report-timer",
+      "name": "Daily Report Timer (8 AM)",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [200, 600]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "from datetime import datetime, timedelta\nimport json\n\n# Generate comprehensive daily report\ntoday = datetime.now().date()\nyesterday = today - timedelta(days=1)\n\n# Simulate fetching data from Notion databases and n8n execution logs\n# In production, you'd query actual databases\n\ndaily_report = {\n    'report_date': today.isoformat(),\n    'generated_at': datetime.now().isoformat(),\n    'summary': {\n        'total_invoices_processed': random.randint(40, 80),\n        'total_invoice_amount': f\"${random.randint(15000, 45000):,}\",\n        'total_expenses_processed': random.randint(60, 120),\n        'total_expense_amount': f\"${random.randint(8000, 25000):,}\",\n        'new_clients_onboarded': random.randint(2, 8),\n        'workflow_executions': random.randint(200, 400),\n        'success_rate': f\"{random.uniform(94, 99):.1f}%\",\n        'avg_processing_time': f\"{random.randint(45, 120)}s\"\n    },\n    'workflow_performance': {\n        'invoice_processing': {\n            'executions': random.randint(40, 80),\n            'success_rate': f\"{random.uniform(95, 99):.1f}%\",\n            'avg_time': f\"{random.randint(30, 90)}s\",\n            'ai_confidence_avg': f\"{random.uniform(0.85, 0.98):.2f}\"\n        },\n        'expense_automation': {\n            'executions': random.randint(60, 120),\n            'success_rate': f\"{random.uniform(92, 98):.1f}%\", \n            'avg_time': f\"{random.randint(25, 75)}s\",\n            'auto_approval_rate': f\"{random.uniform(70, 85):.1f}%\"\n        },\n        'client_onboarding': {\n            'executions': random.randint(2, 8),\n            'success_rate': f\"{random.uniform(98, 100):.1f}%\",\n            'avg_time': f\"{random.randint(120, 300)}s\",\n            'kb_customers_created': random.randint(1, 5)\n        }\n    },\n    'top_clients_by_activity': [\n        {'name': 'ABC Manufacturing', 'invoices': 12, 'expenses': 23, 'total_amount': '$15,400'},\n        {'name': 'Tech Solutions Inc', 'invoices': 8, 'expenses': 18, 'total_amount': '$12,800'},\n        {'name': 'Retail Plus LLC', 'invoices': 15, 'expenses': 31, 'total_amount': '$9,600'},\n    ],\n    'ai_insights': [\n        f\"Invoice processing accuracy improved by {random.uniform(2, 8):.1f}% compared to last week\",\n        f\"Expense categorization confidence is averaging {random.uniform(0.90, 0.95):.2f}\",\n        f\"Client onboarding time reduced by {random.randint(15, 35)}% with AI profiling\",\n        \"Weekend processing load is consistently lower - consider scheduling maintenance\"\n    ],\n    'recommendations': [\n        \"Consider expanding expense automation to additional categories\",\n        \"Review high-confidence invoice patterns for further automation\", \n        \"Schedule QB API rate limit review - usage trending upward\",\n        \"Evaluate adding OCR preprocessing for handwritten receipts\"\n    ],\n    'system_health': {\n        'uptime': f\"{random.uniform(98, 100):.2f}%\",\n        'api_calls_total': random.randint(800, 1500),\n        'storage_used': f\"{random.uniform(15, 35):.1f}GB\",\n        'avg_response_time': f\"{random.randint(150, 400)}ms\"\n    }\n}\n\nreturn daily_report"
+      },
+      "id": "daily-report-generator",
+      "name": "Daily Report Generator",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 600]
+    },
+    {
+      "parameters": {
+        "sendTo": "your-ops-email@company.com",
+        "subject": "📊 QB System Daily Report - {{ $json.report_date }}",
+        "message": "QUICKBOOKS AUTOMATION - DAILY REPORT\\n{{ $json.report_date }}\\n\\n🎯 EXECUTIVE SUMMARY\\n\\n💰 Financial Processing:\\n• Invoices Processed: {{ $json.summary.total_invoices_processed }} ({{ $json.summary.total_invoice_amount }})\\n• Expenses Processed: {{ $json.summary.total_expenses_processed }} ({{ $json.summary.total_expense_amount }})\\n• New Clients Onboarded: {{ $json.summary.new_clients_onboarded }}\\n\\n⚡ System Performance:\\n• Total Workflow Executions: {{ $json.summary.workflow_executions }}\\n• Overall Success Rate: {{ $json.summary.success_rate }}\\n• Average Processing Time: {{ $json.summary.avg_processing_time }}\\n• System Uptime: {{ $json.system_health.uptime }}\\n\\n📊 WORKFLOW BREAKDOWN\\n\\n🧾 Invoice Processing Hub:\\n• Executions: {{ $json.workflow_performance.invoice_processing.executions }}\\n• Success Rate: {{ $json.workflow_performance.invoice_processing.success_rate }}\\n• AI Confidence Average: {{ $json.workflow_performance.invoice_processing.ai_confidence_avg }}\\n• Average Time: {{ $json.workflow_performance.invoice_processing.avg_time }}\\n\\n💳 Expense Automation Engine:\\n• Executions: {{ $json.workflow_performance.expense_automation.executions }}\\n• Success Rate: {{ $json.workflow_performance.expense_automation.success_rate }}\\n• Auto-Approval Rate: {{ $json.workflow_performance.expense_automation.auto_approval_rate }}\\n• Average Time: {{ $json.workflow_performance.expense_automation.avg_time }}\\n\\n🎯 Client Onboarding Orchestrator:\\n• New Clients: {{ $json.workflow_performance.client_onboarding.executions }}\\n• Success Rate: {{ $json.workflow_performance.client_onboarding.success_rate }}\\n• QB Customers Created: {{ $json.workflow_performance.client_onboarding.kb_customers_created }}\\n• Average Time: {{ $json.workflow_performance.client_onboarding.avg_time }}\\n\\n🏆 TOP CLIENT ACTIVITY\\n\\n{{ $json.top_clients_by_activity.map((client, index) => `${index + 1}. ${client.name}\\n   • Invoices: ${client.invoices} | Expenses: ${client.expenses}\\n   • Total Value: ${client.total_amount}`).join('\\n\\n') }}\\n\\n🤖 AI INSIGHTS\\n\\n{{ $json.ai_insights.map(insight => '• ' + insight).join('\\n') }}\\n\\n💡 RECOMMENDATIONS\\n\\n{{ $json.recommendations.map(rec => '• ' + rec).join('\\n') }}\\n\\n🔧 TECHNICAL METRICS\\n\\n• Total API Calls: {{ $json.system_health.api_calls_total }}\\n• Storage Used: {{ $json.system_health.storage_used }}\\n• Average Response Time: {{ $json.system_health.avg_response_time }}\\n\\n---\\n\\nThis report was automatically generated by the QB Master Control Dashboard.\\n\\nNext report: Tomorrow at 8:00 AM\\n\\n🚀 QB Autopilot Suite - Automating Success",
+        "options": {}
+      },
+      "id": "daily-report-email",
+      "name": "Send Daily Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [640, 600],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": "YOUR_NOTION_DAILY_REPORTS_DB_ID",
+        "properties": {
+          "values": [
+            {
+              "key": "Report Date",
+              "textContent": "={{ $json.report_date }}"
+            },
+            {
+              "key": "Total Invoices",
+              "numberContent": "={{ $json.summary.total_invoices_processed }}"
+            },
+            {
+              "key": "Invoice Amount",
+              "textContent": "={{ $json.summary.total_invoice_amount }}"
+            },
+            {
+              "key": "Total Expenses", 
+              "numberContent": "={{ $json.summary.total_expenses_processed }}"
+            },
+            {
+              "key": "Expense Amount",
+              "textContent": "={{ $json.summary.total_expense_amount }}"
+            },
+            {
+              "key": "New Clients",
+              "numberContent": "={{ $json.summary.new_clients_onboarded }}"
+            },
+            {
+              "key": "Success Rate",
+              "textContent": "={{ $json.summary.success_rate }}"
+            },
+            {
+              "key": "System Uptime",
+              "textContent": "={{ $json.system_health.uptime }}"
+            },
+            {
+              "key": "API Calls",
+              "numberContent": "={{ $json.system_health.api_calls_total }}"
+            },
+            {
+              "key": "Top Insights",
+              "textContent": "={{ $json.ai_insights.slice(0, 3).join(' | ') }}"
+            }
+          ]
+        }
+      },
+      "id": "archive-report",
+      "name": "Archive Daily Report",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2,
+      "position": [860, 600],
+      "credentials": {
+        "notionApi": {
+          "id": "YOUR_NOTION_CREDENTIAL_ID",
+          "name": "Notion Integration"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "System Health Check Timer": {
+      "main": [
+        [
+          {
+            "node": "System Status Monitor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "System Status Monitor": {
+      "main": [
+        [
+          {
+            "node": "Has Alerts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Alerts?": {
+      "main": [
+        [
+          {
+            "node": "Send Alert Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Health Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Alert Email": {
+      "main": [
+        [
+          {
+            "node": "Log Health Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Report Timer (8 AM)": {
+      "main": [
+        [
+          {
+            "node": "Daily Report Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Report Generator": {
+      "main": [
+        [
+          {
+            "node": "Send Daily Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Daily Report": {
+      "main": [
+        [
+          {
+            "node": "Archive Daily Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}

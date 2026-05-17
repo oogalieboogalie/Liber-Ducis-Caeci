@@ -1,0 +1,454 @@
+{
+  "name": "QB Client Onboarding Orchestrator",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "client-onboard",
+        "options": {
+          "noResponseBody": false
+        }
+      },
+      "id": "webhook-onboard",
+      "name": "New Client Form Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "client-id",
+              "name": "clientId",
+              "value": "CLIENT-{{ $execution.id }}",
+              "type": "string"
+            },
+            {
+              "id": "onboard-timestamp",
+              "name": "onboardingStarted",
+              "value": "{{ $now }}",
+              "type": "string"
+            },
+            {
+              "id": "company-name",
+              "name": "companyName",
+              "value": "{{ $json.company_name }}",
+              "type": "string"
+            },
+            {
+              "id": "contact-email",
+              "name": "contactEmail",
+              "value": "{{ $json.contact_email }}",
+              "type": "string"
+            },
+            {
+              "id": "contact-phone",
+              "name": "contactPhone",
+              "value": "{{ $json.contact_phone || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "industry",
+              "name": "industry",
+              "value": "{{ $json.industry || 'general' }}",
+              "type": "string"
+            },
+            {
+              "id": "services-requested",
+              "name": "servicesRequested",
+              "value": "{{ $json.services_requested }}",
+              "type": "string"
+            },
+            {
+              "id": "monthly-revenue",
+              "name": "monthlyRevenue",
+              "value": "{{ $json.monthly_revenue || '0' }}",
+              "type": "string"
+            },
+            {
+              "id": "qb-setup-needed",
+              "name": "qbSetupRequired",
+              "value": "{{ $json.services_requested.includes('bookkeeping') || $json.services_requested.includes('quickbooks') }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "client-truth-table",
+      "name": "Client Onboarding Truth",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "You are an expert business consultant. Create comprehensive client profiles for accounting firms.",
+          "temperature": 0.3
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "Based on this client information, create a comprehensive business profile. Return ONLY valid JSON:\n\nClient Data:\nCompany: {{ $json.companyName }}\nIndustry: {{ $json.industry }}\nMonthly Revenue: ${{ $json.monthlyRevenue }}\nServices: {{ $json.servicesRequested }}\n\nReturn:\n{\n  \"industry_classification\": \"specific industry category\",\n  \"business_size\": \"micro|small|medium|large\",\n  \"complexity_score\": 1-10,\n  \"recommended_chart_of_accounts\": [\n    {\"account_name\": \"Revenue - Product Sales\", \"account_number\": \"4001\", \"type\": \"Income\"},\n    {\"account_name\": \"Cost of Goods Sold\", \"account_number\": \"5001\", \"type\": \"COGS\"}\n  ],\n  \"typical_expense_categories\": [\"office_rent\", \"utilities\", \"marketing\", \"professional_services\"],\n  \"reporting_requirements\": [\"monthly_pnl\", \"quarterly_cash_flow\", \"annual_tax_prep\"],\n  \"automation_opportunities\": [\"invoice_processing\", \"expense_tracking\", \"bank_reconciliation\"],\n  \"implementation_timeline\": \"2-4 weeks\",\n  \"estimated_monthly_transactions\": 100,\n  \"priority_workflows\": [\"expense_automation\", \"invoice_processing\"],\n  \"custom_setup_notes\": \"specific recommendations for this client\"\n}",
+              "role": "user"
+            }
+          ]
+        },
+        "model": "gpt-4o-mini"
+      },
+      "id": "ai-profile-builder",
+      "name": "AI Client Profile Builder",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.3,
+      "position": [
+        640,
+        300
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "qb-needed",
+              "leftValue": "={{ $('Client Onboarding Truth').item.json.qbSetupRequired }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combineOperation": "any"
+        },
+        "options": {}
+      },
+      "id": "qb-setup-check",
+      "name": "QuickBooks Setup Needed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        860,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://quickbooks.api.intuit.com/v3/company/{{ $json.company_id }}/customers",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "quickBooksOAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "Customer",
+              "value": "{\n  \"Name\": \"{{ $('Client Onboarding Truth').item.json.companyName }}\",\n  \"CompanyName\": \"{{ $('Client Onboarding Truth').item.json.companyName }}\",\n  \"BillAddr\": {\n    \"Line1\": \"{{ $json.address_line_1 || 'Address TBD' }}\",\n    \"City\": \"{{ $json.city || 'City TBD' }}\",\n    \"CountrySubDivisionCode\": \"{{ $json.state || 'ST' }}\",\n    \"PostalCode\": \"{{ $json.zip_code || '00000' }}\"\n  },\n  \"PrimaryEmailAddr\": {\n    \"Address\": \"{{ $('Client Onboarding Truth').item.json.contactEmail }}\"\n  },\n  \"PrimaryPhone\": {\n    \"FreeFormNumber\": \"{{ $('Client Onboarding Truth').item.json.contactPhone }}\"\n  },\n  \"Notes\": \"Client ID: {{ $('Client Onboarding Truth').item.json.clientId }} | Industry: {{ $('Client Onboarding Truth').item.json.industry }} | Services: {{ $('Client Onboarding Truth').item.json.servicesRequested }}\"\n}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "qb-create-customer",
+      "name": "QuickBooks - Create Customer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1080,
+        200
+      ],
+      "credentials": {
+        "quickBooksOAuth2Api": {
+          "id": "YOUR_QB_OAUTH_CREDENTIAL_ID",
+          "name": "QuickBooks OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "import json\nimport re\n\n# Get AI profile response\nai_response = _input.first().json['response']['text']\n\n# Extract JSON from AI response\njson_match = re.search(r'\\{.*\\}', ai_response, re.DOTALL)\nif not json_match:\n    raise Exception('No valid JSON found in AI response')\n\ntry:\n    profile_data = json.loads(json_match.group())\nexcept json.JSONDecodeError as e:\n    raise Exception(f'Failed to parse JSON: {e}')\n\n# Generate industry-specific Chart of Accounts\nindustry = _input.first().json.get('industry', 'general').lower()\nchart_of_accounts = []\n\n# Base accounts for all businesses\nbase_accounts = [\n    {\"account_name\": \"Checking Account\", \"account_number\": \"1001\", \"type\": \"Bank\"},\n    {\"account_name\": \"Accounts Receivable\", \"account_number\": \"1200\", \"type\": \"Accounts Receivable\"},\n    {\"account_name\": \"Inventory\", \"account_number\": \"1300\", \"type\": \"Other Current Assets\"},\n    {\"account_name\": \"Equipment\", \"account_number\": \"1500\", \"type\": \"Fixed Assets\"},\n    {\"account_name\": \"Accounts Payable\", \"account_number\": \"2000\", \"type\": \"Accounts Payable\"},\n    {\"account_name\": \"Sales Revenue\", \"account_number\": \"4001\", \"type\": \"Income\"},\n    {\"account_name\": \"Cost of Goods Sold\", \"account_number\": \"5001\", \"type\": \"Cost of Goods Sold\"}\n]\n\n# Industry-specific accounts\nif 'retail' in industry or 'e-commerce' in industry:\n    industry_accounts = [\n        {\"account_name\": \"Online Sales Revenue\", \"account_number\": \"4002\", \"type\": \"Income\"},\n        {\"account_name\": \"Shipping Revenue\", \"account_number\": \"4003\", \"type\": \"Income\"},\n        {\"account_name\": \"Product Returns\", \"account_number\": \"4900\", \"type\": \"Income\"},\n        {\"account_name\": \"Inventory Shrinkage\", \"account_number\": \"5050\", \"type\": \"Cost of Goods Sold\"}\n    ]\nelif 'restaurant' in industry or 'food' in industry:\n    industry_accounts = [\n        {\"account_name\": \"Food Sales\", \"account_number\": \"4001\", \"type\": \"Income\"},\n        {\"account_name\": \"Beverage Sales\", \"account_number\": \"4002\", \"type\": \"Income\"},\n        {\"account_name\": \"Food Costs\", \"account_number\": \"5001\", \"type\": \"Cost of Goods Sold\"},\n        {\"account_name\": \"Beverage Costs\", \"account_number\": \"5002\", \"type\": \"Cost of Goods Sold\"}\n    ]\nelif 'service' in industry or 'consulting' in industry:\n    industry_accounts = [\n        {\"account_name\": \"Service Revenue\", \"account_number\": \"4001\", \"type\": \"Income\"},\n        {\"account_name\": \"Consulting Revenue\", \"account_number\": \"4002\", \"type\": \"Income\"},\n        {\"account_name\": \"Contract Labor\", \"account_number\": \"5100\", \"type\": \"Expense\"}\n    ]\nelse:\n    industry_accounts = []\n\n# Common expense accounts\nexpense_accounts = [\n    {\"account_name\": \"Office Rent\", \"account_number\": \"6001\", \"type\": \"Expense\"},\n    {\"account_name\": \"Utilities\", \"account_number\": \"6002\", \"type\": \"Expense\"},\n    {\"account_name\": \"Office Supplies\", \"account_number\": \"6003\", \"type\": \"Expense\"},\n    {\"account_name\": \"Marketing & Advertising\", \"account_number\": \"6100\", \"type\": \"Expense\"},\n    {\"account_name\": \"Professional Services\", \"account_number\": \"6200\", \"type\": \"Expense\"},\n    {\"account_name\": \"Insurance\", \"account_number\": \"6300\", \"type\": \"Expense\"},\n    {\"account_name\": \"Meals & Entertainment\", \"account_number\": \"6400\", \"type\": \"Expense\"},\n    {\"account_name\": \"Travel\", \"account_number\": \"6500\", \"type\": \"Expense\"}\n]\n\n# Combine all accounts\nchart_of_accounts = base_accounts + industry_accounts + expense_accounts\n\n# Update profile with generated COA\nprofile_data['generated_chart_of_accounts'] = chart_of_accounts\nprofile_data['total_accounts'] = len(chart_of_accounts)\n\n# Add client metadata\nprofile_data['client_id'] = _input.first().json['clientId']\nprofile_data['company_name'] = _input.first().json['companyName']\nprofile_data['profile_generated_at'] = _input.first().json['onboardingStarted']\n\nreturn profile_data"
+      },
+      "id": "coa-generator",
+      "name": "Chart of Accounts Generator",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": "YOUR_NOTION_CLIENT_MASTER_DB_ID",
+        "properties": {
+          "values": [
+            {
+              "key": "Client ID",
+              "textContent": "={{ $('Client Onboarding Truth').item.json.clientId }}"
+            },
+            {
+              "key": "Company Name",
+              "textContent": "={{ $('Client Onboarding Truth').item.json.companyName }}"
+            },
+            {
+              "key": "Contact Email",
+              "textContent": "={{ $('Client Onboarding Truth').item.json.contactEmail }}"
+            },
+            {
+              "key": "Industry",
+              "textContent": "={{ $json.industry_classification }}"
+            },
+            {
+              "key": "Business Size",
+              "textContent": "={{ $json.business_size }}"
+            },
+            {
+              "key": "Services Requested",
+              "textContent": "={{ $('Client Onboarding Truth').item.json.servicesRequested }}"
+            },
+            {
+              "key": "Monthly Revenue",
+              "textContent": "={{ $('Client Onboarding Truth').item.json.monthlyRevenue }}"
+            },
+            {
+              "key": "Complexity Score",
+              "numberContent": "={{ $json.complexity_score }}"
+            },
+            {
+              "key": "Implementation Timeline",
+              "textContent": "={{ $json.implementation_timeline }}"
+            },
+            {
+              "key": "Priority Workflows",
+              "textContent": "={{ $json.priority_workflows.join(', ') }}"
+            },
+            {
+              "key": "Status",
+              "textContent": "Onboarding - Profile Created"
+            },
+            {
+              "key": "QB Customer Created",
+              "textContent": "={{ $('Client Onboarding Truth').item.json.qbSetupRequired ? 'Yes' : 'Not Required' }}"
+            }
+          ]
+        }
+      },
+      "id": "client-master-record",
+      "name": "Create Client Master Record",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        300
+      ],
+      "credentials": {
+        "notionApi": {
+          "id": "YOUR_NOTION_CREDENTIAL_ID",
+          "name": "Notion Integration"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "{{ $('Client Onboarding Truth').item.json.contactEmail }}",
+        "subject": "Welcome to Our Team - Your Onboarding Has Begun!",
+        "message": "Dear {{ $('Client Onboarding Truth').item.json.companyName }} Team,\\n\\nWelcome! We're excited to help transform your {{ $json.industry_classification }} business with cutting-edge automation.\\n\\n🎯 Your Onboarding Summary:\\n\\n📋 Client ID: {{ $('Client Onboarding Truth').item.json.clientId }}\\n🏢 Business Profile: {{ $json.business_size | title }} {{ $json.industry_classification }} company\\n⚡ Complexity Score: {{ $json.complexity_score }}/10\\n📅 Estimated Timeline: {{ $json.implementation_timeline }}\\n\\n🚀 Priority Workflows We'll Implement:\\n{{ $json.priority_workflows.map(w => '• ' + w.replace('_', ' ').title()).join('\\n') }}\\n\\n💡 Automation Opportunities Identified:\\n{{ $json.automation_opportunities.map(o => '• ' + o.replace('_', ' ').title()).join('\\n') }}\\n\\n📊 What's Next:\\n1. Our team will schedule your kickoff meeting within 2 business days\\n2. We'll send you a document checklist for smooth setup\\n3. QuickBooks integration {{ $('Client Onboarding Truth').item.json.qbSetupRequired ? 'will be configured' : 'is not required for your services' }}\\n\\n🎉 Get ready to experience the power of AI-driven business automation!\\n\\nBest regards,\\nThe Automation Team\\n\\nP.S. This entire onboarding process was automated by our AI systems - the same technology we'll implement for your business! 🤖",
+        "options": {}
+      },
+
+      "id": "welcome-email",
+      "name": "Send Welcome Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1740, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "calendar": "YOUR_GOOGLE_CALENDAR_ID",
+        "summary": "{{ $('Client Onboarding Truth').item.json.companyName }} - Kickoff Meeting",
+        "description": "Client Onboarding Kickoff Meeting\n\nClient: {{ $('Client Onboarding Truth').item.json.companyName }}\nClient ID: {{ $('Client Onboarding Truth').item.json.clientId }}\nIndustry: {{ $json.industry_classification }}\nServices: {{ $('Client Onboarding Truth').item.json.servicesRequested }}\n\nAgenda:\n- Welcome & introductions\n- Review business profile & automation opportunities\n- Discuss implementation timeline\n- Q&A session\n\nPriority Workflows:\n{{ $json.priority_workflows.map(w => '• ' + w.replace('_', ' ').title()).join('\n') }}",
+        "start": "{{ $now.plus(2, 'days').set({hour: 10, minute: 0}) }}",
+        "end": "{{ $now.plus(2, 'days').set({hour: 11, minute: 0}) }}",
+        "attendees": "{{ $('Client Onboarding Truth').item.json.contactEmail }},your-ops-email@company.com"
+      },
+      "id": "schedule-kickoff",
+      "name": "Schedule Kickoff Meeting",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 2,
+      "position": [1960, 300],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "YOUR_GOOGLE_CALENDAR_CREDENTIAL_ID",
+          "name": "Google Calendar OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "your-ops-email@company.com",
+        "subject": "New Client Onboarded - {{ $('Client Onboarding Truth').item.json.companyName }}",
+        "message": "🎉 NEW CLIENT ALERT 🎉\n\n{{ $('Client Onboarding Truth').item.json.companyName }} has completed onboarding!\n\n📊 CLIENT SUMMARY:\n• Client ID: {{ $('Client Onboarding Truth').item.json.clientId }}\n• Industry: {{ $json.industry_classification }}\n• Business Size: {{ $json.business_size }}\n• Monthly Revenue: ${{ $('Client Onboarding Truth').item.json.monthlyRevenue }}\n• Complexity Score: {{ $json.complexity_score }}/10\n\n🚀 SERVICES REQUESTED:\n{{ $('Client Onboarding Truth').item.json.servicesRequested }}\n\n⚡ PRIORITY WORKFLOWS:\n{{ $json.priority_workflows.map(w => '• ' + w.replace('_', ' ').title()).join('\n') }}\n\n💡 AUTOMATION OPPORTUNITIES:\n{{ $json.automation_opportunities.map(o => '• ' + o.replace('_', ' ').title()).join('\n') }}\n\n📅 TIMELINE: {{ $json.implementation_timeline }}\n\n{{ $('Client Onboarding Truth').item.json.qbSetupRequired ? '✅ QuickBooks customer created' : '❌ QuickBooks setup not required' }}\n\nKickoff meeting scheduled for 2 business days out.\n\n🎯 ACTION ITEMS:\n1. Review client profile in Notion\n2. Prepare kickoff presentation\n3. Set up project workspace\n\nLet's make this pilot a huge success! 🚀",
+        "options": {}
+      },
+      "id": "internal-notification",
+      "name": "Internal Team Notification",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2180, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail OAuth2"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "New Client Form Webhook": {
+      "main": [
+        [
+          {
+            "node": "Client Onboarding Truth",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Client Onboarding Truth": {
+      "main": [
+        [
+          {
+            "node": "AI Client Profile Builder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Client Profile Builder": {
+      "main": [
+        [
+          {
+            "node": "QuickBooks Setup Needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "QuickBooks Setup Needed?": {
+      "main": [
+        [
+          {
+            "node": "QuickBooks - Create Customer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Chart of Accounts Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "QuickBooks - Create Customer": {
+      "main": [
+        [
+          {
+            "node": "Chart of Accounts Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chart of Accounts Generator": {
+      "main": [
+        [
+          {
+            "node": "Create Client Master Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Client Master Record": {
+      "main": [
+        [
+          {
+            "node": "Send Welcome Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Welcome Email": {
+      "main": [
+        [
+          {
+            "node": "Schedule Kickoff Meeting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Kickoff Meeting": {
+      "main": [
+        [
+          {
+            "node": "Internal Team Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

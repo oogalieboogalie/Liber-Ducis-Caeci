@@ -1,0 +1,453 @@
+{
+  "name": "QB Expense Automation Engine",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "expense-capture",
+        "options": {
+          "noResponseBody": false
+        }
+      },
+      "id": "webhook-expense",
+      "name": "Expense Capture Webhook",
+      "type": "n8n-nodes-base.webhook", 
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "unique-id",
+              "name": "uniqueId",
+              "value": "{{ $execution.id }}",
+              "type": "string"
+            },
+            {
+              "id": "timestamp",
+              "name": "processingTimestamp", 
+              "value": "{{ $now }}",
+              "type": "string"
+            },
+            {
+              "id": "receipt-path",
+              "name": "tempReceiptPath",
+              "value": "/tmp/receipt_{{ $execution.id }}_{{ $json.filename || 'receipt.jpg' }}",
+              "type": "string"
+            },
+            {
+              "id": "employee-id",
+              "name": "employeeId",
+              "value": "{{ $json.employee_id || 'default' }}",
+              "type": "string"
+            },
+            {
+              "id": "client-id",
+              "name": "clientId",
+              "value": "{{ $json.client_id || 'default' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "expense-truth-table",
+      "name": "Expense Table of Truth",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "operation": "writeFile",
+        "fileName": "={{ $('Expense Table of Truth').item.json.tempReceiptPath }}",
+        "dataPropertyName": "data"
+      },
+      "id": "save-receipt",
+      "name": "Save Receipt File",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "You are an expert expense receipt analyzer. Extract ALL receipt data with high accuracy and suggest appropriate business categories.",
+          "temperature": 0.1
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "Analyze this receipt/expense document. Return ONLY valid JSON:\n{\n  \"merchant_name\": \"\",\n  \"merchant_address\": \"\", \n  \"date\": \"YYYY-MM-DD\",\n  \"total_amount\": 0.00,\n  \"tax_amount\": 0.00,\n  \"subtotal\": 0.00,\n  \"payment_method\": \"\",\n  \"line_items\": [\n    {\n      \"description\": \"\",\n      \"quantity\": 1,\n      \"amount\": 0.00\n    }\n  ],\n  \"suggested_category\": \"meals|travel|office_supplies|utilities|equipment|other\",\n  \"suggested_account\": \"6001 - Meals & Entertainment|7001 - Travel|5001 - Office Supplies\",\n  \"business_purpose\": \"suggested business purpose based on merchant and items\",\n  \"confidence_score\": 0.95,\n  \"requires_receipt_review\": false\n}",
+              "role": "user"
+            }
+          ]
+        },
+        "model": "gpt-4o-mini",
+        "inputType": "binary"
+      },
+      "id": "ai-receipt-analyzer",
+      "name": "AI Receipt Analyzer",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.3,
+      "position": [860, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "qdrantCollection": {
+          "__rl": true,
+          "mode": "list",
+          "value": "expense_learning"
+        },
+        "options": {}
+      },
+      "id": "expense-learning-store",
+      "name": "Smart Category Learning",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "typeVersion": 1.3,
+      "position": [1080, 200],
+      "credentials": {
+        "qdrantApi": {
+          "id": "YOUR_QDRANT_CREDENTIAL_ID",
+          "name": "Qdrant"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "retrieve",
+        "qdrantCollection": {
+          "__rl": true,
+          "mode": "list", 
+          "value": "expense_learning"
+        },
+        "topK": 3,
+        "options": {}
+      },
+      "id": "category-lookup",
+      "name": "Category History Lookup",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "typeVersion": 1.3,
+      "position": [1080, 300],
+      "credentials": {
+        "qdrantApi": {
+          "id": "YOUR_QDRANT_CREDENTIAL_ID",
+          "name": "Qdrant"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "import json\nimport re\nfrom datetime import datetime\n\n# Get AI response\nai_response = _input.first().json['response']['text']\n\n# Extract JSON from AI response  \njson_match = re.search(r'\\{.*\\}', ai_response, re.DOTALL)\nif not json_match:\n    raise Exception('No valid JSON found in AI response')\n\ntry:\n    expense_data = json.loads(json_match.group())\nexcept json.JSONDecodeError as e:\n    raise Exception(f'Failed to parse JSON: {e}')\n\n# Apply business rules based on merchant and amount\nmerchant = expense_data.get('merchant_name', '').lower()\namount = float(expense_data.get('total_amount', 0))\n\n# Smart categorization rules\nif 'starbucks' in merchant or 'coffee' in merchant:\n    expense_data['suggested_category'] = 'meals'\n    expense_data['suggested_account'] = '6001 - Meals & Entertainment'\n    expense_data['business_purpose'] = 'Client meeting/Business discussion'\nelif 'uber' in merchant or 'lyft' in merchant or 'taxi' in merchant:\n    expense_data['suggested_category'] = 'travel'\n    expense_data['suggested_account'] = '7001 - Travel Expense'\n    expense_data['business_purpose'] = 'Business travel/Client visit'\nelif 'office depot' in merchant or 'staples' in merchant:\n    expense_data['suggested_category'] = 'office_supplies'\n    expense_data['suggested_account'] = '5001 - Office Supplies'\n    expense_data['business_purpose'] = 'Office operational supplies'\nelif amount > 500:\n    expense_data['requires_receipt_review'] = True\n    expense_data['business_purpose'] = 'High-value expense - requires approval'\n\n# Data cleaning\nif 'total_amount' in expense_data:\n    try:\n        expense_data['total_amount'] = float(str(expense_data['total_amount']).replace('$', '').replace(',', ''))\n    except:\n        expense_data['total_amount'] = 0.0\n\n# Add processing metadata\nexpense_data['processing_id'] = _input.first().json['uniqueId']\nexpense_data['processed_at'] = datetime.now().isoformat() \nexpense_data['status'] = 'processed'\nexpense_data['employee_id'] = _input.first().json['employeeId']\nexpense_data['client_id'] = _input.first().json['clientId']\n\n# Auto-approval logic\nif (\n    expense_data.get('confidence_score', 0) >= 0.85 and\n    expense_data.get('total_amount', 0) <= 100 and\n    not expense_data.get('requires_receipt_review', False)\n):\n    expense_data['auto_approved'] = True\n    expense_data['status'] = 'auto_approved'\nelse:\n    expense_data['auto_approved'] = False\n    expense_data['status'] = 'requires_approval'\n\nreturn expense_data"
+      },
+      "id": "business-rules-engine",
+      "name": "Business Rules Engine",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "auto-approved",
+              "leftValue": "={{ $json.auto_approved }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combineOperation": "any"
+        },
+        "options": {}
+      },
+      "id": "approval-check",
+      "name": "Auto-Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1520, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://quickbooks.api.intuit.com/v3/company/{{ $json.company_id }}/purchases",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "quickBooksOAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "Purchase",
+              "value": "{\n  \"PaymentType\": \"Cash\",\n  \"AccountRef\": {\n    \"value\": \"35\",\n    \"name\": \"Checking\"\n  },\n  \"TxnDate\": \"{{ $json.date }}\",\n  \"TotalAmt\": {{ $json.total_amount }},\n  \"Line\": [\n    {\n      \"Amount\": {{ $json.total_amount }},\n      \"DetailType\": \"AccountBasedExpenseLineDetail\",\n      \"AccountBasedExpenseLineDetail\": {\n        \"AccountRef\": {\n          \"value\": \"7\",\n          \"name\": \"{{ $json.suggested_account }}\"\n        }\n      }\n    }\n  ],\n  \"DocNumber\": \"EXP-{{ $json.processing_id }}\",\n  \"PrivateNote\": \"{{ $json.business_purpose }} | Merchant: {{ $json.merchant_name }}\"\n}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "qb-create-expense",
+      "name": "QuickBooks - Create Expense",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1740, 200],
+      "credentials": {
+        "quickBooksOAuth2Api": {
+          "id": "YOUR_QB_OAUTH_CREDENTIAL_ID",
+          "name": "QuickBooks OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "{{ $json.employee_email || 'your-ops-email@company.com' }}",
+        "subject": "Expense Requires Approval - {{ $json.merchant_name }}",
+        "message": "Expense submission requires approval:\n\nMerchant: {{ $json.merchant_name }}\nAmount: ${{ $json.total_amount }}\nDate: {{ $json.date }}\nSuggested Category: {{ $json.suggested_category }}\nBusiness Purpose: {{ $json.business_purpose }}\n\nProcessing ID: {{ $json.processing_id }}\n\nPlease review and approve in the expense system.",
+        "options": {}
+      },
+      "id": "approval-request",
+      "name": "Send Approval Request",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1740, 400],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "parent": {
+          "__rl": true,
+          "mode": "list",
+          "value": "expense-receipts-archive"
+        },
+        "name": "{{ $json.client_id }}_{{ $json.date }}_{{ $json.merchant_name }}_{{ $json.processing_id }}.{{ $json.filename.split('.').pop() }}",
+        "resolveData": true
+      },
+      "id": "archive-receipt",
+      "name": "Archive Receipt to Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1960, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create", 
+        "databaseId": "YOUR_NOTION_EXPENSE_LOG_DB_ID",
+        "properties": {
+          "values": [
+            {
+              "key": "Merchant",
+              "textContent": "={{ $json.merchant_name }}"
+            },
+            {
+              "key": "Amount",
+              "numberContent": "={{ $json.total_amount }}"
+            },
+            {
+              "key": "Date",
+              "textContent": "={{ $json.date }}"
+            },
+            {
+              "key": "Category",
+              "textContent": "={{ $json.suggested_category }}"
+            },
+            {
+              "key": "Status",
+              "textContent": "={{ $json.auto_approved ? 'Auto-Posted' : 'Pending Approval' }}"
+            },
+            {
+              "key": "Employee",
+              "textContent": "={{ $json.employee_id }}"
+            },
+            {
+              "key": "Client",
+              "textContent": "={{ $json.client_id }}"
+            },
+            {
+              "key": "Processing ID",
+              "textContent": "={{ $json.processing_id }}"
+            },
+            {
+              "key": "Confidence",
+              "numberContent": "={{ $json.confidence_score }}"
+            }
+          ]
+        }
+      },
+      "id": "expense-log",
+      "name": "Log to Expense Tracker",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2,
+      "position": [2180, 300],
+      "credentials": {
+        "notionApi": {
+          "id": "YOUR_NOTION_CREDENTIAL_ID",
+          "name": "Notion Integration"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Expense Capture Webhook": {
+      "main": [
+        [
+          {
+            "node": "Expense Table of Truth",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Expense Table of Truth": {
+      "main": [
+        [
+          {
+            "node": "Save Receipt File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Receipt File": {
+      "main": [
+        [
+          {
+            "node": "AI Receipt Analyzer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Receipt Analyzer": {
+      "main": [
+        [
+          {
+            "node": "Category History Lookup",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Smart Category Learning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Category History Lookup": {
+      "main": [
+        [
+          {
+            "node": "Business Rules Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Business Rules Engine": {
+      "main": [
+        [
+          {
+            "node": "Auto-Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto-Approved?": {
+      "main": [
+        [
+          {
+            "node": "QuickBooks - Create Expense",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Approval Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "QuickBooks - Create Expense": {
+      "main": [
+        [
+          {
+            "node": "Archive Receipt to Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Approval Request": {
+      "main": [
+        [
+          {
+            "node": "Archive Receipt to Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Archive Receipt to Drive": {
+      "main": [
+        [
+          {
+            "node": "Log to Expense Tracker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
